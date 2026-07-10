@@ -1,3 +1,17 @@
+### This is a fork of the HuggingFace's [nanoVLM repository] (https://github.com/huggingface/nanoVLM)
+
+#### Changes in this fork: shorter training run (~5-6h on a single H100)
+
+The upstream `main` branch defaults to a 450M-parameter model (SigLIP2-256 + SmolLM2-360M) that takes well over a day for a full run. This fork retunes the config back to a v0.1-style **222M** model (SigLIP2-256 + SmolLM2-135M-Instruct) and fixes a loss-masking bug, to get a full training run down to ~5-6h on a single H100:
+
+- **Fixed a critical `nan`-loss bug** in `data/datasets.py` (`BaseDataset._prepare_inputs_and_loss_mask`): under `transformers>=5.3`, `tokenizer.apply_chat_template(..., tokenize=True)` returns a `BatchEncoding` rather than a token list unless `return_dict=True` is passed. The per-message span calculation used `len()` on that object directly, silently returning the dict's key count (2) instead of the token count, so every assistant span ended up empty and all labels were masked to `-100` — meaning loss was `nan` on every batch regardless of any other setting.
+- **Reduced vision/sequence footprint** in `models/config.py`: `vit_img_size`/`max_img_size` 512/2048 → 256, `vit_model_type` → `siglip2-base-patch16-256`, `mp_pixel_shuffle_factor` 4 → 2, `lm_max_length`/`max_sample_length` 4096 → 512. This avoids the multi-tile image splitting that was driving very long sequences per sample.
+- **Tuned batch size** for throughput/memory headroom on H100: `batch_size` 2 → 48, `gradient_accumulation_steps` 8 → 2 (effective batch 96), based on a clean micro-batch sweep (48/64/96/128) with no other GPU contention.
+- **Reduced step budget**: `max_training_steps` 40000 → 22000, to match the token budget of the original ~6h v0.1 run rather than the larger v0.2 default.
+- Compatibility fixes for current `transformers`: `models/language_model.py` reads `rope_theta` via `hf_config.rope_parameters` when the top-level attribute isn't present; `generate.py` no longer relies on `apply_chat_template(tokenize=True)` on a list-of-lists (now tokenizes the rendered string directly).
+
+---
+
 # nanoVLM
 
 ![nanoVLM](assets/nanoVLM.png)
@@ -32,6 +46,8 @@ Similar to Andrej Karpathy's nanoGPT, we wanted to equip the community with a ve
 
 The model definition and training logic of this repository fits in ~750 lines, with some more boilerplate logging and parameter loading. 
 Using the [`SigLIP-B/16-224-85M`](https://huggingface.co/google/siglip-base-patch16-224) and [`HuggingFaceTB/SmolLM2-135M`](https://huggingface.co/HuggingFaceTB/SmolLM2-135M) as backbones results in a **222M** nanoVLM. Training this for ~6h on a single H100 GPU on ~1.7M samples of [the cauldron](https://huggingface.co/datasets/HuggingFaceM4/the_cauldron) results in an accuracy of 35.3% on MMStar.
+
+> Note: the figure above is the original upstream result (`the_cauldron` dataset). This fork's default `train_dataset_path` in `models/config.py` now streams from [`HuggingFaceM4/FineVision_concat_shuffled_2`](https://huggingface.co/datasets/HuggingFaceM4/FineVision_concat_shuffled_2) instead, so training data and resulting accuracy will differ from the number above.
 
 ![loss](assets/nanoVLM-222M-loss.png)
 
