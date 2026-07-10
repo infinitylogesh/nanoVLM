@@ -275,7 +275,7 @@ def train(train_cfg, vlm_cfg):
     run_name = get_run_name(train_cfg, vlm_cfg)
     if train_cfg.log_wandb and is_master():
         run = wandb.init(
-            entity=train_cfg.wandb_entity,
+            # entity=train_cfg.wandb_entity,
             project="nanoVLM",
             config={
                 "VLMConfig": asdict(vlm_cfg),
